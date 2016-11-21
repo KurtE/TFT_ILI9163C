@@ -11,7 +11,8 @@
 	uint8_t TFT_ILI9163C::ILI9163C_instance = 0;
 
 	#if defined(__MK20DX128__) || defined(__MK20DX256__) || defined(__MK64FX512__) || defined(__MK66FX1M0__) //Teensy 3.0, Teensy 3.1, Teensy 3.2
-	TFT_ILI9163C::TFT_ILI9163C(const enum ILI9163C_dispType d,const uint8_t cspin,const uint8_t dcpin,const uint8_t rstpin,const uint8_t mosi,const uint8_t sclk)
+	TFT_ILI9163C::TFT_ILI9163C(const enum ILI9163C_dispType d,const uint8_t cspin,const uint8_t dcpin,const uint8_t rstpin,const uint8_t mosi,
+				const uint8_t sclk, SPINClass *pspin)
 	{
 		_cs   = cspin;
 		_dc   = dcpin;
@@ -19,6 +20,13 @@
 		_mosi = mosi;
 		_sclk = sclk;
 		TFT_ILI9163C_DISP = d;
+
+		_pspin = pspin;
+		_pkinetisk_spi = _pspin->kinetisk_spi();
+		// Added to see how much impact actually using non hardware CS pin might be
+    	_cspinmask = 0;
+    	_csport = NULL;
+
 	}
 	#elif defined(__MKL26Z64__) //Teensy LC
 	TFT_ILI9163C::TFT_ILI9163C(const enum ILI9163C_dispType d,const uint8_t cspin,const uint8_t dcpin,const uint8_t rstpin,const uint8_t mosi,const uint8_t sclk)
@@ -43,13 +51,20 @@
 	#endif
 #else
 	#if defined(__MK20DX128__) || defined(__MK20DX256__) || defined(__MK64FX512__) || defined(__MK66FX1M0__) //Teensy 3.0, Teensy 3.1, Teensy 3.2
-	TFT_ILI9163C::TFT_ILI9163C(const uint8_t cspin,const uint8_t dcpin,const uint8_t rstpin,const uint8_t mosi,const uint8_t sclk)
+	TFT_ILI9163C::TFT_ILI9163C(const uint8_t cspin,const uint8_t dcpin,const uint8_t rstpin,const uint8_t mosi,const uint8_t sclk, 
+				SPINClass *pspin)
 	{
 		_cs   = cspin;
 		_dc   = dcpin;
 		_rst  = rstpin;
 		_mosi = mosi;
 		_sclk = sclk;
+
+		_pspin = pspin;
+		_pkinetisk_spi = _pspin->kinetisk_spi();
+		// Added to see how much impact actually using non hardware CS pin might be
+    	_cspinmask = 0;
+    	_csport = NULL;
 	}
 	#elif defined(__MKL26Z64__) //Teensy LC
 	TFT_ILI9163C::TFT_ILI9163C(const uint8_t cspin,const uint8_t dcpin,const uint8_t rstpin,const uint8_t mosi,const uint8_t sclk)
@@ -278,59 +293,59 @@ void TFT_ILI9163C::begin(bool avoidSPIinit)
 		digitalWriteFast(_cs,HIGH);
 	#endif
 		enableDataStream();
-#elif defined(__MK20DX128__) || defined(__MK20DX256__)//Teensy 3.0 -> 3.2
-	if ((_mosi == 11 || _mosi == 7) && (_sclk == 13 || _sclk == 14)) {
-        SPI.setMOSI(_mosi);
-        SPI.setSCK(_sclk);
-	} else {
-		bitSet(_initError,0);
-		return;
-	}
-	if (!avoidSPIinit) SPI.begin();
-	if (SPI.pinIsChipSelect(_cs, _dc)) {
-		pcs_data = SPI.setCS(_cs);
-		pcs_command = pcs_data | SPI.setCS(_dc);
-	} else {
-		pcs_data = 0;
-		pcs_command = 0;
-		bitSet(_initError,1);
-		return;
-	}
-#elif defined(__MK64FX512__) || defined(__MK66FX1M0__)//Teensy 3.4 -> 3.5
-	if ((_mosi == 11 || _mosi == 7) && (_sclk == 13 || _sclk == 14)) {
-		// ------------ SPI0 ---------------
-		_useSPI = 0;
-		SPI.setMOSI(_mosi);
-		SPI.setSCK(_sclk);
-		if (!avoidSPIinit) SPI.begin();
-		if (SPI.pinIsChipSelect(_cs, _dc)) {
-			pcs_data = SPI.setCS(_cs);
-			pcs_command = pcs_data | SPI.setCS(_dc);
-		} else {
-			bitSet(_initError,1);
-			return;
+#elif defined(__MK20DX128__) || defined(__MK20DX256__) || defined(__MK64FX512__) || defined(__MK66FX1M0__)//(arm) Teensy 3.0, 3.1, 3.2
+	// Using SPIN objects, but lets see in case of newer processors if we can recover if they
+	// default SPIN object and pass in pins for other SPI... 
+	if ((_mosi != 255) || (_sclk != 255))  {
+		if (!(_pspin->pinIsMOSI(_mosi)) || !(_pspin->pinIsSCK(_sclk))) {
+
+			#ifdef SPIN1_OBJECT_CREATED			
+			if (SPIN1.pinIsMOSI(_mosi) && SPIN1.pinIsSCK(_sclk)) {
+				_pspin = &SPIN1;
+				_pkinetisk_spi = _pspin->kinetisk_spi();
+			} else {
+
+				#ifdef SPIN2_OBJECT_CREATED			
+				if (SPIN2.pinIsMOSI(_mosi) && SPIN2.pinIsSCK(_sclk)) {
+					_pspin = &SPIN2;
+					_pkinetisk_spi = _pspin->kinetisk_spi();
+				} else {
+				#endif
+			#endif
+					bitSet(_initError,0);
+        			return; // not valid pins...
+				#ifdef SPIN2_OBJECT_CREATED			
+        		}
+        		#endif
+			#ifdef SPIN1_OBJECT_CREATED			
+			}
+			#endif
+
 		}
-	} else if (_mosi == 0 && _sclk == 32) {
-		// ------------ SPI1 ---------------
-		// [hint], instead assign CS I'm assigning DC that will be much busy
-		// CS will be handled separately by startTransition and command/data_last
-		_useSPI = 1;
-		SPI1.setMOSI(_mosi);
-		SPI1.setSCK(_sclk);
-		pinMode(_cs, OUTPUT);
-		disableCS();
-		if (!avoidSPIinit) SPI1.begin();
-		if (SPI1.pinIsChipSelect(_dc)) {
+        _pspin->setMOSI(_mosi);
+        _pspin->setSCK(_sclk);
+	}
+
+	if (!avoidSPIinit) _pspin->begin();
+
+	if (_pspin->pinIsChipSelect(_cs, _dc)) {
+		pcs_data = _pspin->setCS(_cs);
+		pcs_command = pcs_data | _pspin->setCS(_dc);
+	} else {
+		// See if at least DC is on chipselect pin, if so try to limp along...
+		if (_pspin->pinIsChipSelect(_dc)) {
 			pcs_data = 0;
-			pcs_command = pcs_data | SPI1.setCS(_dc);
+			pcs_command = pcs_data | _pspin->setCS(_dc);
+			pinMode(_cs, OUTPUT);
+			_csport    = portOutputRegister(digitalPinToPort(_cs));
+  			_cspinmask = digitalPinToBitMask(_cs);
+  			//Serial.printf("CS(%d) not cs: %x %x\n\r", _cs, _csport, _cspinmask);
 		} else {
+			pcs_data = 0;
+			pcs_command = 0;
 			bitSet(_initError,1);
 			return;
 		}
-	// TODO SPI2 --------------------------
-	} else {
-		bitSet(_initError,0);
-		return;
 	}
 #elif defined(ESP8266)//(arm) XTENSA ESP8266
 	pinMode(_dc, OUTPUT);
