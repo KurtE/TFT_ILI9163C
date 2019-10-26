@@ -61,7 +61,7 @@
 		_sclk = sclk;
 
 		_pspin = pspin;
-		_pkinetisk_spi = _pspin->kinetisk_spi();
+		_pkinetisk_spi = &_pspin->port();
 		// Added to see how much impact actually using non hardware CS pin might be
     	_cspinmask = 0;
     	_csport = NULL;
